@@ -47,7 +47,7 @@ import java.util.logging.Logger;
 public class VeloGuardProxyPlugin extends Plugin implements Listener {
 
     // characters to use to build a token
-    private static final String TOKEN_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    private static final String TOKEN_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!@#$%^&*()-_=+[]{}:;,<.>?";
     // version used in token config
     private static final int TOKEN_VERSION = 1;
 
@@ -129,7 +129,7 @@ public class VeloGuardProxyPlugin extends Plugin implements Listener {
         }
 
         if (this.token == null || this.token.isEmpty()) {
-            this.token = generateToken(64);
+            this.token = generateToken(96);
 
             Configuration configuration = new Configuration();
             configuration.set("token", this.token);
