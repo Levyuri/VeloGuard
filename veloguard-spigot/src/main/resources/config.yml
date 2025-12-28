@@ -15,7 +15,7 @@ no-data-kick-message:
   - '&7to finish securing your proxy setup.'
   - ''
   - '§7More information:'
-  - '&f'
+  - '&b&nhttps://github.com/Levyuri/VeloGuard'
 
 # Kick message sent to connections with forwarding data, but without a correct VeloGuard token
 # included in their handshake. Assuming VeloGuard is installed correctly on all proxies,
@@ -26,7 +26,7 @@ invalid-token-kick-message:
   - '&cThe token sent by proxy server is not allowed by this backend server.'
   - ''
   - '§7More information:'
-  - '&f'
+  - '&b&nhttps://github.com/Levyuri/VeloGuard'
 
 # Defines if VeloGuard should detail errors in the console.
 # Useful for debugging purposes.
