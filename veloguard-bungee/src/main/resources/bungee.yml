@@ -1,0 +1,5 @@
+name: VeloGuard
+version: ${project.version}
+description: A plugin-based security/firewall solution for BungeeCord and Velocity proxies.
+author: Luck, Levyuri
+main: me.levyuri.veloguard.bungee.VeloGuardProxyPlugin

@@ -1,0 +1,16 @@
+name: VeloGuard
+version: ${project.version}
+description: A plugin-based security/firewall solution for VeloGuard and Velocity proxies.
+authors: [Luck, NickUC, Levyuri]
+load: STARTUP
+
+main: me.levyuri.veloguard.spigot.VeloGuardBackendPlugin
+softdepend: [ProtocolLib]
+api-version: 1.13
+folia-supported: true
+
+commands:
+  veloguard:
+    description: Reloads the configuration
+    permission: veloguard.reload
+    usage: /veloguard reload

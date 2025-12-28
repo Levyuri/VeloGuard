@@ -1,5 +1,0 @@
-name: BungeeGuard
-version: ${project.version}
-description: A plugin-based security/firewall solution for BungeeCord and Velocity proxies.
-author: Luck
-main: me.lucko.bungeeguard.bungee.BungeeGuardProxyPlugin

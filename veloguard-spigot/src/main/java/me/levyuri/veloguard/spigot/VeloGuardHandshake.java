@@ -1,0 +1,210 @@
+/*
+ * This file is part of BungeeGuard, licensed under the MIT License.
+ *
+ *  Copyright (c) lucko (Luck) <luck@lucko.me>
+ *  Copyright (c) contributors
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files (the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions:
+ *
+ *  The above copyright notice and this permission notice shall be included in all
+ *  copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ *  SOFTWARE.
+ */
+
+package me.levyuri.veloguard.spigot;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
+import me.levyuri.veloguard.backend.TokenStore;
+
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+
+/**
+ * Encapsulates a BungeeCord/Velocity "ip forwarding" handshake result.
+ */
+public class VeloGuardHandshake {
+
+    /** The name of the VeloGuard auth token. */
+    private static final String VELOGUARD_TOKEN_NAME = "veloguard-token";
+    /** The key used to define the name of properties in the handshake. */
+    private static final String PROPERTY_NAME_KEY = "name";
+    /** The key used to define the value of properties in the handshake. */
+    private static final String PROPERTY_VALUE_KEY = "value";
+    /** The maximum allowed length of the handshake. */
+    private static final int HANDSHAKE_LENGTH_LIMIT = 5_000;
+
+    /** Shared Gson instance. */
+    private static final Gson GSON = new Gson();
+    /** The type of the property list in the handshake. */
+    private static final Type PROPERTY_LIST_TYPE = new TypeToken<List<JsonObject>>(){}.getType();
+
+    /**
+     * Decodes a BungeeCord handshake, additionally ensuring it contains a
+     * VeloGuard token allowed by the {@link TokenStore}.
+     *
+     * @param handshake the handshake data
+     * @param tokenStore the token store
+     * @return the handshake result
+     */
+    public static VeloGuardHandshake decodeAndVerify(String handshake, TokenStore tokenStore) {
+        try {
+            return decodeAndVerify0(handshake, tokenStore);
+        } catch (Exception e) {
+            new Exception("Failed to decode handshake", e).printStackTrace();
+            return new Fail(Fail.Reason.INVALID_HANDSHAKE, encodeBase64(handshake));
+        }
+    }
+
+    private static VeloGuardHandshake decodeAndVerify0(String handshake, TokenStore tokenStore) throws Exception {
+        if (tokenStore.isUsingDefaultConfig()) {
+            return new Fail(Fail.Reason.INCORRECT_TOKEN, "Allowed tokens have not been configured! Please refer to https://github.com/lucko/BungeeGuard/blob/master/INSTALLATION.md for help.");
+        }
+
+        if (handshake.length() > HANDSHAKE_LENGTH_LIMIT) {
+            return new Fail(Fail.Reason.INVALID_HANDSHAKE, "handshake length " + handshake.length() + " is > " + HANDSHAKE_LENGTH_LIMIT);
+        }
+
+        String[] split = handshake.split("\00");
+        boolean isFloodgate = split.length == 5 && split[1].startsWith("^Floodgate^");
+        if (!isFloodgate && split.length != 3 && split.length != 4) {
+            return new Fail(Fail.Reason.INVALID_HANDSHAKE, encodeBase64(handshake));
+        }
+
+        int readIndex;
+        String serverHostname = split[0];
+        if (isFloodgate) {
+            serverHostname += "\00" + split[1];
+            readIndex = 2;
+        } else {
+            readIndex = 1;
+        }
+        String socketAddressHostname = split[readIndex++];
+        UUID uniqueId;
+        try {
+            uniqueId = UUID.fromString(split[readIndex++].replaceFirst("(\\w{8})(\\w{4})(\\w{4})(\\w{4})(\\w{12})", "$1-$2-$3-$4-$5"));
+        } catch (Exception e) {
+            return new Fail(Fail.Reason.INVALID_UNIQUE_ID, encodeBase64(handshake));
+        }
+
+        String connectionDescription = uniqueId + " @ " + encodeBase64(socketAddressHostname);
+
+        if (split.length == 3) {
+            return new Fail(Fail.Reason.NO_TOKEN, connectionDescription);
+        }
+
+        List<JsonObject> properties = new LinkedList<>(GSON.fromJson(split[readIndex], PROPERTY_LIST_TYPE));
+        if (properties.isEmpty()) {
+            return new Fail(Fail.Reason.NO_TOKEN, connectionDescription);
+        }
+
+        String veloGuardToken = null;
+        for (Iterator<JsonObject> iterator = properties.iterator(); iterator.hasNext(); ) {
+            JsonObject property = iterator.next();
+            if (property.get(PROPERTY_NAME_KEY).getAsString().equals(VELOGUARD_TOKEN_NAME)) {
+                if (veloGuardToken != null) {
+                    return new Fail(Fail.Reason.DUPLICATED_TOKEN, connectionDescription);
+                }
+
+                veloGuardToken = property.get(PROPERTY_VALUE_KEY).getAsString();
+                iterator.remove();
+            }
+        }
+
+        if (veloGuardToken == null) {
+            return new Fail(Fail.Reason.NO_TOKEN, connectionDescription);
+        }
+
+        if (!tokenStore.isAllowed(veloGuardToken)) {
+            return new Fail(Fail.Reason.INCORRECT_TOKEN, connectionDescription + " - " + encodeBase64(veloGuardToken));
+        }
+
+        String newPropertiesString = GSON.toJson(properties, PROPERTY_LIST_TYPE);
+        return new Success(serverHostname, socketAddressHostname, uniqueId, newPropertiesString);
+    }
+    
+    public static String encodeBase64(String s) {
+        return Base64.getEncoder().encodeToString(s.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Encapsulates a successful handshake.
+     */
+    public static final class Success extends VeloGuardHandshake {
+        private final String serverHostname;
+        private final String socketAddressHostname;
+        private final UUID uniqueId;
+        private final String propertiesJson;
+
+        Success(String serverHostname, String socketAddressHostname, UUID uniqueId, String propertiesJson) {
+            this.serverHostname = serverHostname;
+            this.socketAddressHostname = socketAddressHostname;
+            this.uniqueId = uniqueId;
+            this.propertiesJson = propertiesJson;
+        }
+
+        public String serverHostname() {
+            return this.serverHostname;
+        }
+
+        public String socketAddressHostname() {
+            return this.socketAddressHostname;
+        }
+
+        public UUID uniqueId() {
+            return this.uniqueId;
+        }
+
+        public String propertiesJson() {
+            return this.propertiesJson;
+        }
+
+        /**
+         * Re-encodes this handshake to the format used by BungeeCord/Velocity.
+         *
+         * @return an encoded string for the handshake
+         */
+        public String encode() {
+            return this.serverHostname + "\00" + this.socketAddressHostname + "\00" + this.uniqueId + "\00" + this.propertiesJson;
+        }
+    }
+
+    /**
+     * Encapsulates an unsuccessful handshake.
+     */
+    public static final class Fail extends VeloGuardHandshake {
+        private final Reason reason;
+        private final String connectionDescription;
+
+        Fail(Reason reason, String connectionDescription) {
+            this.reason = reason;
+            this.connectionDescription = connectionDescription;
+        }
+
+        public Reason reason() {
+            return this.reason;
+        }
+
+        public String describeConnection() {
+            return this.connectionDescription;
+        }
+
+        public enum Reason {
+            INVALID_HANDSHAKE, INVALID_UNIQUE_ID, NO_TOKEN, DUPLICATED_TOKEN, INCORRECT_TOKEN
+        }
+    }
+}
